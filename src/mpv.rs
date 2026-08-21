@@ -130,6 +130,27 @@ impl MpvLib {
         }
     }
 
+    /// プロパティを文字列で取得する (動画サイズなど再生中の状態を読むため)
+    pub fn get_property_string(&self, ctx: MpvHandle, prop: &str) -> Result<String> {
+        let name = cstr(prop)?;
+        unsafe {
+            let f: libloading::Symbol<
+                unsafe extern "C" fn(MpvHandle, *const c_char) -> *const c_char,
+            > = self.symbol(b"mpv_get_property_string")?;
+            let ptr = f(ctx, name.as_ptr());
+            if ptr.is_null() {
+                // プロパティが未確定 (例: 動画読み込み前) の場合はエラー扱い
+                return Err(Error::Mpv(format!("プロパティ {prop} を取得できません"), 0));
+            }
+            let value = CStr::from_ptr(ptr).to_string_lossy().into_owned();
+            // 戻り値は mpv 側で確保されたメモリなので mpv_free で解放する
+            if let Ok(free) = self.symbol::<unsafe extern "C" fn(*mut c_void)>(b"mpv_free") {
+                free(ptr as *mut c_void);
+            }
+            Ok(value)
+        }
+    }
+
     /// mpv コマンドを実行する (args は最後に NULL を付ける)
     pub fn command(&self, ctx: MpvHandle, args: &[&str]) -> Result<()> {
         let owned: Vec<CString> = args.iter().map(|s| cstr(s)).collect::<Result<_>>()?;
@@ -263,6 +284,10 @@ impl Mpv {
 
     pub fn set_property(&mut self, name: &str, value: &str) -> Result<()> {
         self.lib.set_property_string(self.ctx, name, value)
+    }
+
+    pub fn get_property(&self, name: &str) -> Result<String> {
+        self.lib.get_property_string(self.ctx, name)
     }
 
     pub fn command(&mut self, args: &[&str]) -> Result<()> {

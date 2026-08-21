@@ -4,7 +4,7 @@
 //! として別プロセスで起動し、設定は config.toml に書き込む。
 //! メインプロセスは設定ファイルの変更を監視して反映する。
 
-use crate::config::{Config, DisplayMode};
+use crate::config::{BackgroundFit, Config, DisplayMode};
 use ab_glyph::Font;
 use egui::FontFamily;
 use std::collections::BTreeMap;
@@ -16,8 +16,8 @@ pub fn run_settings_window() -> Result<(), eframe::Error> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Livetop 設定")
-            .with_inner_size([520.0, 460.0])
-            .with_min_inner_size([400.0, 320.0]),
+            .with_inner_size([520.0, 580.0])
+            .with_min_inner_size([400.0, 420.0]),
         ..Default::default()
     };
 
@@ -93,6 +93,7 @@ struct SettingsApp {
     display_videos: BTreeMap<usize, String>,
     autostart: bool,
     muted: bool,
+    background_fit: BackgroundFit,
     display_mode: DisplayMode,
     display_index: usize,
     message: String,
@@ -113,6 +114,7 @@ impl SettingsApp {
                 .collect(),
             autostart: config.autostart,
             muted: config.muted,
+            background_fit: config.background_fit,
             display_mode: config.display_mode,
             display_index: config.display_index,
             message: String::new(),
@@ -139,6 +141,7 @@ impl SettingsApp {
             display_videos,
             autostart: self.autostart,
             muted: self.muted,
+            background_fit: self.background_fit,
             display_mode: self.display_mode,
             display_index: self.display_index,
         };
@@ -186,6 +189,19 @@ impl eframe::App for SettingsApp {
 
                     ui.label("音声");
                     ui.checkbox(&mut self.muted, "ミュート (低負荷)");
+                    ui.end_row();
+
+                    ui.label("背景の表示方法");
+                    ui.vertical(|ui| {
+                        for fit in [
+                            BackgroundFit::FitWidth,
+                            BackgroundFit::FitScreen,
+                            BackgroundFit::Cover,
+                            BackgroundFit::Center,
+                        ] {
+                            ui.radio_value(&mut self.background_fit, fit, fit.label());
+                        }
+                    });
                     ui.end_row();
 
                     ui.label("表示モード");

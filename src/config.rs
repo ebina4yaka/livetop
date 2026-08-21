@@ -34,6 +34,32 @@ impl DisplayMode {
     }
 }
 
+/// 動画をデスクトップ背景にどう合わせるか
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BackgroundFit {
+    /// 動画の幅を画面の幅いっぱいに合わせる (縦にはみ出しや余白が出ることがある)
+    FitWidth,
+    /// 動画全体が見えるように画面内に収める
+    FitScreen,
+    /// 画面を埋め尽くすまで拡大し、はみ出した部分は切り取る
+    Cover,
+    /// 拡大縮小せず等倍のまま中央に表示する
+    Center,
+}
+
+impl BackgroundFit {
+    /// 表示名 (設定画面用)
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::FitWidth => "ページ幅に合わせる",
+            Self::FitScreen => "画面のサイズに合わせる",
+            Self::Cover => "拡大して表示",
+            Self::Center => "中央に表示",
+        }
+    }
+}
+
 /// 永続化する設定
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -44,6 +70,8 @@ pub struct Config {
     pub autostart: bool,
     /// 音声をミュートにするか
     pub muted: bool,
+    /// 背景動画の合わせ方
+    pub background_fit: BackgroundFit,
     /// ディスプレイへの適用方法
     pub display_mode: DisplayMode,
     /// `Specific` モードで使用するディスプレイの番号 (0 始まり)
@@ -61,6 +89,8 @@ impl Default for Config {
             autostart: false,
             // 壁紙用途では初期状態でミュート (低負荷のため音声デコードも無効化)
             muted: true,
+            // 既定は従来動作と同じ「画面を埋め尽くす」表示
+            background_fit: BackgroundFit::Cover,
             // 初期設定はメインディスプレイのみに表示する
             display_mode: DisplayMode::Specific,
             display_index: crate::wallpaper::primary_display_index(),
@@ -212,8 +242,33 @@ mod tests {
         assert!(c.video_path.is_none());
         assert!(!c.autostart);
         assert!(c.muted, "壁紙用途の初期設定はミュート");
+        assert_eq!(c.background_fit, BackgroundFit::Cover);
         assert_eq!(c.display_mode, DisplayMode::Specific);
         assert!(c.display_videos.is_empty());
+    }
+
+    #[test]
+    fn background_fit_serde_names() {
+        // 未指定フィールドは既定値 (Cover) で埋まることも確認する
+        let names = [
+            (BackgroundFit::FitWidth, "fit_width"),
+            (BackgroundFit::FitScreen, "fit_screen"),
+            (BackgroundFit::Cover, "cover"),
+            (BackgroundFit::Center, "center"),
+        ];
+        for (fit, name) in names {
+            let c = Config {
+                background_fit: fit,
+                ..Config::default()
+            };
+            let text = toml::to_string_pretty(&c).unwrap();
+            assert!(text.contains(&format!("background_fit = \"{name}\"")));
+            let parsed: Config = toml::from_str(&text).unwrap();
+            assert_eq!(parsed.background_fit, fit);
+        }
+        // 旧バージョンの設定ファイル (background_fit 項目なし) も読める
+        let legacy: Config = toml::from_str("muted = true").unwrap();
+        assert_eq!(legacy.background_fit, BackgroundFit::Cover);
     }
 
     #[test]
@@ -222,6 +277,7 @@ mod tests {
             video_path: Some(PathBuf::from(r"C:\videos\test.mp4")),
             autostart: true,
             muted: false,
+            background_fit: BackgroundFit::FitWidth,
             display_mode: DisplayMode::PerDisplay,
             display_index: 1,
             display_videos: BTreeMap::from([
@@ -241,6 +297,7 @@ mod tests {
             video_path: Some(PathBuf::from("some-video.mp4")),
             autostart: true,
             muted: false,
+            background_fit: BackgroundFit::Center,
             display_mode: DisplayMode::Spanning,
             display_index: 0,
             display_videos: BTreeMap::from([(1, PathBuf::from("per1.mp4"))]),

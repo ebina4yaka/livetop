@@ -3,7 +3,7 @@
 //! 設定ウィンドウは別プロセス (`livetop --settings`) で動かし、
 //! 設定ファイル (config.toml) の変更を監視して反映する。
 
-use crate::config::{self, Config, DisplayMode};
+use crate::config::{self, BackgroundFit, Config, DisplayMode};
 use crate::wallpaper::{DesktopHost, MonitorInfo, WallpaperWindow};
 use crate::{autostart, tray, video, wallpaper};
 use std::path::Path;
@@ -208,7 +208,13 @@ fn rebuild_wallpapers(
         let video = config.video_for_display(display_index);
 
         // 各ウィンドウに動画プレイヤーを作成する
-        let mut player = match video::VideoPlayer::new(hwnd, config.muted) {
+        let window_size = (rect.width, rect.height);
+        let mut player = match video::VideoPlayer::new(
+            hwnd,
+            window_size,
+            config.muted,
+            config.background_fit,
+        ) {
             Ok(p) => Some(p),
             Err(e) => {
                 log::error!(
@@ -331,6 +337,11 @@ fn apply_config_changes(
         apply_videos_to_all(instances, new);
     }
 
+    // 背景の合わせ方の変更を全ウィンドウへ反映
+    if old.background_fit != new.background_fit {
+        set_fit_all(instances, new.background_fit);
+    }
+
     // ミュート設定の変更を全ウィンドウへ反映
     if old.muted != new.muted {
         set_muted_all(instances, new.muted);
@@ -353,7 +364,7 @@ fn apply_videos_to_all(instances: &mut [WallpaperInstance], config: &Config) {
         let video = config.video_for_display(inst.display_index);
         if video != inst.current_video {
             if let Some(path) = video.as_ref() {
-                load_or_recreate_player(inst, path, config.muted);
+                load_or_recreate_player(inst, path, config.muted, config.background_fit);
             }
             inst.current_video = video;
         }
@@ -361,14 +372,20 @@ fn apply_videos_to_all(instances: &mut [WallpaperInstance], config: &Config) {
 }
 
 /// 1 ウィンドウ分の動画を読み込む (プレイヤー未初期化なら再作成を試みる)
-fn load_or_recreate_player(inst: &mut WallpaperInstance, path: &Path, muted: bool) {
+fn load_or_recreate_player(
+    inst: &mut WallpaperInstance,
+    path: &Path,
+    muted: bool,
+    fit: BackgroundFit,
+) {
     if let Some(p) = inst.player.as_mut() {
         if let Err(e) = p.load_file(path) {
             log::error!("動画の読み込みに失敗しました: {e}");
         }
     } else {
         let hwnd = inst.window.hwnd();
-        match video::VideoPlayer::new(hwnd, muted) {
+        let window_size = (inst.window.rect.width, inst.window.rect.height);
+        match video::VideoPlayer::new(hwnd, window_size, muted, fit) {
             Ok(mut p) => {
                 if let Err(e) = p.load_file(path) {
                     log::error!("動画の読み込みに失敗しました: {e}");
@@ -388,6 +405,17 @@ fn set_muted_all(instances: &mut [WallpaperInstance], muted: bool) {
             && let Err(e) = p.set_muted(muted)
         {
             log::error!("音声設定の反映に失敗しました: {e}");
+        }
+    }
+}
+
+/// 全ウィンドウへ背景の合わせ方を適用する
+fn set_fit_all(instances: &mut [WallpaperInstance], fit: BackgroundFit) {
+    for inst in instances.iter_mut() {
+        if let Some(p) = inst.player.as_mut()
+            && let Err(e) = p.set_fit(fit)
+        {
+            log::error!("背景の表示方法の反映に失敗しました: {e}");
         }
     }
 }

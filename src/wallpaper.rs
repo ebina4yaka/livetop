@@ -18,12 +18,11 @@ use windows::Win32::UI::HiDpi::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, EnumWindows, FindWindowExW,
-    FindWindowW, GW_CHILD, GW_HWNDNEXT, GetClassNameW, GetSystemMetrics, GetWindow,
-    GetWindowRect, HWND_BOTTOM, IsWindow, IsWindowVisible, MONITORINFOF_PRIMARY,
-    MSG, PM_REMOVE, PeekMessageW, RegisterClassExW, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN,
-    SMTO_ABORTIFHUNG, SW_SHOWNOACTIVATE, SWP_FRAMECHANGED, SWP_NOACTIVATE, SendMessageTimeoutW,
-    SetParent, SetWindowPos, ShowWindow, TranslateMessage, WM_QUIT, WNDCLASSEXW,
-    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_POPUP,
+    FindWindowW, GW_CHILD, GW_HWNDNEXT, GetClassNameW, GetSystemMetrics, GetWindow, GetWindowRect,
+    HWND_BOTTOM, IsWindow, IsWindowVisible, MONITORINFOF_PRIMARY, MSG, PM_REMOVE, PeekMessageW,
+    RegisterClassExW, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SMTO_ABORTIFHUNG, SW_SHOWNOACTIVATE,
+    SWP_FRAMECHANGED, SWP_NOACTIVATE, SendMessageTimeoutW, SetParent, SetWindowPos, ShowWindow,
+    TranslateMessage, WM_QUIT, WNDCLASSEXW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_POPUP,
 };
 use windows::core::{BOOL, PCWSTR, w};
 
