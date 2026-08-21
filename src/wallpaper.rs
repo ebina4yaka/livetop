@@ -18,11 +18,11 @@ use windows::Win32::UI::HiDpi::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, EnumWindows, FindWindowExW,
-    FindWindowW, GW_CHILD, GW_HWNDNEXT, GWL_EXSTYLE, GetClassNameW, GetSystemMetrics, GetWindow,
-    GetWindowLongPtrW, GetWindowRect, HWND_BOTTOM, IsWindow, IsWindowVisible, MONITORINFOF_PRIMARY,
+    FindWindowW, GW_CHILD, GW_HWNDNEXT, GetClassNameW, GetSystemMetrics, GetWindow,
+    GetWindowRect, HWND_BOTTOM, IsWindow, IsWindowVisible, MONITORINFOF_PRIMARY,
     MSG, PM_REMOVE, PeekMessageW, RegisterClassExW, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN,
     SMTO_ABORTIFHUNG, SW_SHOWNOACTIVATE, SWP_FRAMECHANGED, SWP_NOACTIVATE, SendMessageTimeoutW,
-    SetParent, SetWindowLongPtrW, SetWindowPos, ShowWindow, TranslateMessage, WM_QUIT, WNDCLASSEXW,
+    SetParent, SetWindowPos, ShowWindow, TranslateMessage, WM_QUIT, WNDCLASSEXW,
     WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_POPUP,
 };
 use windows::core::{BOOL, PCWSTR, w};
@@ -241,7 +241,6 @@ impl DesktopHost {
             if let Some(workerw) = find_workerw() {
                 let _ = SetParent(hwnd, Some(workerw));
                 self.parent = Some(workerw);
-                apply_window_styles(hwnd);
                 place_bottom(hwnd, self.parent, rect);
                 log::info!(
                     "壁紙ウィンドウを WorkerW (0x{:X}) へ付着させました",
@@ -253,7 +252,6 @@ impl DesktopHost {
             if let Some(progman) = find_progman() {
                 let _ = SetParent(hwnd, Some(progman));
                 self.parent = Some(progman);
-                apply_window_styles(hwnd);
                 place_bottom(hwnd, self.parent, rect);
                 log::info!(
                     "壁紙ウィンドウを Progman (0x{:X}) 直下へ付着させました",
@@ -303,15 +301,6 @@ fn place_bottom(hwnd: HWND, parent: Option<HWND>, rect: &MonitorInfo) {
             rect.height,
             SWP_NOACTIVATE | SWP_FRAMECHANGED,
         );
-    }
-}
-
-/// タスクバーや Alt-Tab に表示されないように拡張スタイルを設定する
-fn apply_window_styles(hwnd: HWND) {
-    unsafe {
-        let current = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
-        let flags = (WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW).0;
-        let _ = SetWindowLongPtrW(hwnd, GWL_EXSTYLE, (current | flags) as isize);
     }
 }
 
@@ -507,11 +496,5 @@ impl MessageLoop {
             }
         }
         self.running
-    }
-}
-
-impl Default for MessageLoop {
-    fn default() -> Self {
-        Self::new()
     }
 }

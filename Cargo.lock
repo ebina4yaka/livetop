@@ -2121,7 +2121,6 @@ version = "0.1.0"
 dependencies = [
  "ab_glyph",
  "anyhow",
- "crossbeam-channel",
  "dirs",
  "eframe",
  "egui",

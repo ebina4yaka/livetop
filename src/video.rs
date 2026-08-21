@@ -87,15 +87,6 @@ impl VideoPlayer {
         self.muted
     }
 
-    /// 何も再生していない (アイドル) 状態かどうか
-    pub fn is_idle(&mut self) -> bool {
-        self.mpv
-            .get_property("idle-active")
-            .ok()
-            .flatten()
-            .is_some_and(|v| v == "yes")
-    }
-
     /// 溜まっている mpv のイベント (ログ等) を処理する
     pub fn pump_events(&mut self) {
         self.mpv.pump_events();

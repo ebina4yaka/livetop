@@ -17,9 +17,6 @@ pub enum Error {
     #[error("設定ファイルの読み書きに失敗しました: {0}")]
     Config(#[from] std::io::Error),
 
-    #[error("設定ファイルの解析に失敗しました: {0}")]
-    ConfigParse(String),
-
     #[error("設定ファイルの保存に失敗しました: {0}")]
     ConfigEncode(String),
 
@@ -31,9 +28,6 @@ pub enum Error {
 
     #[error("トレイアイコンの作成に失敗しました: {0}")]
     Tray(String),
-
-    #[error("設定ウィンドウの起動に失敗しました: {0}")]
-    Settings(String),
 }
 
 /// アプリ全体の `Result` エイリアス
