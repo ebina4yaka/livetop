@@ -1,0 +1,15 @@
+Livetop は libmpv (libmpv-2.dll) を使用しています。
+
+libmpv は GNU Lesser General Public License version 2.1 以降 (LGPLv2.1+) の
+もとで配布されており、本アプリはこれを動的リンク (実行時の DLL ロード)
+によって使用しています。利用者は libmpv-2.dll を互換バージョンに
+置き換えることができます。
+
+同梱の libmpv-2.dll は zhongfly/mpv-winbuild のリリース
+(mpv-dev-lgpl-x86_64) から無改変で取得したものです。
+
+ソースコードは以下から入手できます (LGPL 2.1 第 6 条に基づく提供):
+  - mpv 本体:      https://github.com/mpv-player/mpv
+  - ビルドスクリプト: https://github.com/zhongfly/mpv-winbuild
+
+ライセンスの全文は LICENSE.LGPL を参照してください。

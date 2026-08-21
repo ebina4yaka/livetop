@@ -1,0 +1,43 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: テスト
+        run: cargo test --all --locked
+
+      - name: ビルド
+        run: cargo build --release --locked
+
+      - name: libmpv (LGPL) の取得
+        shell: pwsh
+        run: |
+          $json = Invoke-RestMethod "https://api.github.com/repos/zhongfly/mpv-winbuild/releases/latest"
+          $asset = $json.assets | Where-Object { $_.name -like "mpv-dev-lgpl-x86_64-*.7z" } | Select-Object -First 1
+          if (-not $asset) { throw "LGPL 版 libmpv のアセットが見つかりません" }
+          Invoke-WebRequest $asset.browser_download_url -OutFile mpv.7z
+          7z e mpv.7z libmpv-2.dll -otarget\release -y
+          if (-not (Test-Path target\release\libmpv-2.dll)) { throw "libmpv-2.dll の展開に失敗しました" }
+
+      - name: インストーラー作成
+        run: |
+          $version = "${{ github.ref_name }}".TrimStart('v')
+          makensis /DVERSION=$version installer.nsi
+
+      - name: リリース公開
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = "${{ github.ref_name }}".TrimStart('v')
+          gh release create "${{ github.ref_name }}" "Livetop-$version-setup.exe" --generate-notes
