@@ -52,10 +52,22 @@ impl BackgroundFit {
     /// 表示名 (設定画面用)
     pub fn label(&self) -> &'static str {
         match self {
-            Self::FitWidth => "ページ幅に合わせる",
+            Self::FitWidth => "横幅に合わせる",
             Self::FitScreen => "画面のサイズに合わせる",
             Self::Cover => "拡大して表示",
             Self::Center => "中央に表示",
+        }
+    }
+
+    /// 動きの説明 (設定画面の補足表示用)
+    ///
+    /// ラベルだけでは「はみ出す/余白が出る」の違いが伝わらないため補う。
+    pub fn description(&self) -> &'static str {
+        match self {
+            Self::FitWidth => "画面の横幅いっぱいに拡縮する (縦にはみ出しや余白が出ることがある)",
+            Self::FitScreen => "動画全体が見えるように収める (余白が出ることがある)",
+            Self::Cover => "画面を埋め尽くすまで拡大し、はみ出した部分は切り取る",
+            Self::Center => "拡大縮小せず等倍のまま中央に表示する",
         }
     }
 }

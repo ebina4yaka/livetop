@@ -96,7 +96,24 @@ struct SettingsApp {
     background_fit: BackgroundFit,
     display_mode: DisplayMode,
     display_index: usize,
+    /// フォーム下部に表示するメッセージ (成功時はウィンドウを閉じるためエラー専用)
     message: String,
+}
+
+/// 警告表示の色 (エラーの赤と区別できるよう落ち着いたオレンジ)
+const WARNING_COLOR: egui::Color32 = egui::Color32::from_rgb(0xE0, 0x8A, 0x1E);
+
+/// パスが入力済みで実在しない場合に警告を表示する
+///
+/// 保存はブロックしない (ネットワークドライブ一時切断などでも保存できてよい)。
+// ponytail: 毎フレーム Path::exists を叩く。ローカルディスクなら無視できるが、
+// 死んだ UNC パスを貼るとフレーム毎にスタットが遅延し得る。問題が出たら
+// 「文字列が変わった時だけチェック」のキャッシュに差し替える。
+fn missing_file_warning(ui: &mut egui::Ui, path: &str) {
+    let path = path.trim();
+    if !path.is_empty() && !std::path::Path::new(path).exists() {
+        ui.colored_label(WARNING_COLOR, "ファイルが見つかりません");
+    }
 }
 
 impl SettingsApp {
@@ -122,6 +139,8 @@ impl SettingsApp {
     }
 
     /// フォームの値を設定ファイルへ保存する
+    ///
+    /// 成功時は呼び出し元がウィンドウを閉じるため、`message` は失敗時のみ使う。
     fn apply(&mut self) -> bool {
         let video_path = self.video_path.trim();
         let display_videos = self
@@ -132,6 +151,8 @@ impl SettingsApp {
                 (!v.is_empty()).then(|| (*k, PathBuf::from(v)))
             })
             .collect();
+        // モニタ取り外し後に範囲外の番号が保存されないようにする
+        let monitor_count = crate::wallpaper::monitors().len();
         let new_cfg = Config {
             video_path: if video_path.is_empty() {
                 None
@@ -143,13 +164,10 @@ impl SettingsApp {
             muted: self.muted,
             background_fit: self.background_fit,
             display_mode: self.display_mode,
-            display_index: self.display_index,
+            display_index: self.display_index.min(monitor_count.saturating_sub(1)),
         };
         match new_cfg.save() {
-            Ok(()) => {
-                self.message = "保存しました。".to_string();
-                true
-            }
+            Ok(()) => true,
             Err(e) => {
                 self.message = format!("保存に失敗しました: {e}");
                 false
@@ -160,93 +178,115 @@ impl SettingsApp {
 
 impl eframe::App for SettingsApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        // ダイアログの標準的なキー操作: Esc で閉じる、Ctrl+Enter で適用
+        let (close_requested, apply_requested) = ui.ctx().input(|i| {
+            (
+                i.key_pressed(egui::Key::Escape),
+                i.key_pressed(egui::Key::Enter) && i.modifiers.ctrl,
+            )
+        });
+        if close_requested {
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+
         egui::CentralPanel::default().show(ui, |ui| {
-            ui.add_space(4.0);
-            ui.heading("Livetop 設定");
-            ui.add_space(8.0);
+            // PerDisplay モードでモニタ数が多いときも読めるようスクロール可能にする
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                ui.add_space(4.0);
+                ui.heading("Livetop 設定");
+                ui.add_space(8.0);
 
-            egui::Grid::new("settings")
-                .num_columns(2)
-                .spacing([8.0, 12.0])
-                .show(ui, |ui| {
-                    ui.label("壁紙動画");
-                    ui.horizontal(|ui| {
-                        ui.add(
-                            egui::TextEdit::singleline(&mut self.video_path)
-                                .hint_text("動画ファイルのパス"),
-                        );
-                        if ui.button("参照...").clicked()
-                            && let Some(path) = crate::dialog::pick_video_file()
-                        {
-                            self.video_path = path.display().to_string();
-                        }
-                    });
-                    ui.end_row();
+                egui::Grid::new("settings")
+                    .num_columns(2)
+                    .spacing([8.0, 12.0])
+                    .show(ui, |ui| {
+                        ui.label("壁紙動画");
+                        ui.vertical(|ui| {
+                            ui.horizontal(|ui| {
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut self.video_path)
+                                        .hint_text("動画ファイルのパス")
+                                        .desired_width(ui.available_width() - 90.0),
+                                );
+                                if ui.button("参照...").clicked()
+                                    && let Some(path) = crate::dialog::pick_video_file()
+                                {
+                                    self.video_path = path.display().to_string();
+                                }
+                            });
+                            missing_file_warning(ui, &self.video_path);
+                        });
+                        ui.end_row();
 
-                    ui.label("自動起動");
-                    ui.checkbox(&mut self.autostart, "Windows 起動時に自動で適用する");
-                    ui.end_row();
+                        ui.label("自動起動");
+                        ui.checkbox(&mut self.autostart, "Windows 起動時に自動で適用する");
+                        ui.end_row();
 
-                    ui.label("音声");
-                    ui.checkbox(&mut self.muted, "ミュート (低負荷)");
-                    ui.end_row();
+                        ui.label("音声");
+                        ui.checkbox(&mut self.muted, "ミュート (低負荷)");
+                        ui.end_row();
 
-                    ui.label("背景の表示方法");
-                    ui.vertical(|ui| {
-                        for fit in [
-                            BackgroundFit::FitWidth,
-                            BackgroundFit::FitScreen,
-                            BackgroundFit::Cover,
-                            BackgroundFit::Center,
-                        ] {
-                            ui.radio_value(&mut self.background_fit, fit, fit.label());
-                        }
-                    });
-                    ui.end_row();
-
-                    ui.label("表示モード");
-                    ui.vertical(|ui| {
-                        ui.radio_value(
-                            &mut self.display_mode,
-                            DisplayMode::Spanning,
-                            "全画面にまたがって表示",
-                        );
-                        ui.radio_value(
-                            &mut self.display_mode,
-                            DisplayMode::PerDisplay,
-                            "各ディスプレイ毎に表示",
-                        );
-                        ui.horizontal(|ui| {
-                            ui.radio_value(
-                                &mut self.display_mode,
-                                DisplayMode::Specific,
-                                "指定ディスプレイのみ",
-                            );
-                            if self.display_mode == DisplayMode::Specific {
-                                self.display_selector(ui);
+                        ui.label("背景の表示方法");
+                        ui.vertical(|ui| {
+                            for fit in [
+                                BackgroundFit::FitWidth,
+                                BackgroundFit::FitScreen,
+                                BackgroundFit::Cover,
+                                BackgroundFit::Center,
+                            ] {
+                                // ラベルだけでは違いが分からないため説明をツールチップで添える
+                                ui.radio_value(&mut self.background_fit, fit, fit.label())
+                                    .on_hover_text(fit.description());
                             }
                         });
+                        ui.end_row();
+
+                        ui.label("表示モード");
+                        ui.vertical(|ui| {
+                            // 文言は DisplayMode::label() に一元化する (トレイ表示と統一)
+                            ui.radio_value(
+                                &mut self.display_mode,
+                                DisplayMode::Spanning,
+                                DisplayMode::Spanning.label(),
+                            );
+                            ui.radio_value(
+                                &mut self.display_mode,
+                                DisplayMode::PerDisplay,
+                                DisplayMode::PerDisplay.label(),
+                            );
+                            ui.horizontal(|ui| {
+                                ui.radio_value(
+                                    &mut self.display_mode,
+                                    DisplayMode::Specific,
+                                    DisplayMode::Specific.label(),
+                                );
+                                if self.display_mode == DisplayMode::Specific {
+                                    self.display_selector(ui);
+                                }
+                            });
+                        });
+                        ui.end_row();
                     });
-                    ui.end_row();
+
+                // 「各ディスプレイ毎に表示」のときだけ、ディスプレイ毎の動画を編集できる
+                if self.display_mode == DisplayMode::PerDisplay {
+                    self.display_videos_editor(ui);
+                }
+
+                ui.add_space(12.0);
+                ui.horizontal(|ui| {
+                    let clicked = ui.button("適用").clicked();
+                    if (clicked || apply_requested) && self.apply() {
+                        // 保存できたらウィンドウを閉じる
+                        ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+                    }
+                    if !self.message.is_empty() {
+                        ui.colored_label(egui::Color32::RED, &self.message);
+                    }
                 });
-
-            // 「各ディスプレイ毎に表示」のときだけ、ディスプレイ毎の動画を編集できる
-            if self.display_mode == DisplayMode::PerDisplay {
-                self.display_videos_editor(ui);
-            }
-
-            ui.add_space(12.0);
-            ui.horizontal(|ui| {
-                if ui.button("適用").clicked() && self.apply() {
-                    // 保存できたらウィンドウを閉じる
-                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
-                }
-                if !self.message.is_empty() {
-                    ui.label(&self.message);
-                }
+                ui.add_space(4.0);
+                ui.small("適用すると即座に壁紙動画が切り替わります。");
             });
-            ui.add_space(4.0);
-            ui.small("適用すると即座に壁紙動画が切り替わります。");
         });
     }
 }
@@ -286,11 +326,15 @@ impl SettingsApp {
                     .file_name()
                     .map(|f| f.to_string_lossy().into_owned())
                     .unwrap_or_default();
-                ui.label(if current.is_empty() {
+                // 同名ファイルで判別できるよう、フルパスはツールチップで見られるようにする
+                let label = ui.label(if current.is_empty() {
                     "未指定".to_string()
                 } else {
                     name
                 });
+                if !current.is_empty() {
+                    label.on_hover_text(&current);
+                }
                 if ui.button("参照...").clicked()
                     && let Some(path) = crate::dialog::pick_video_file()
                 {
@@ -300,6 +344,7 @@ impl SettingsApp {
                     self.display_videos.remove(&i);
                 }
             });
+            missing_file_warning(ui, &current);
         }
     }
 }
