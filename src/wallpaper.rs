@@ -18,7 +18,7 @@ use windows::Win32::UI::HiDpi::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, EnumWindows, FindWindowExW,
-    FindWindowW, GW_CHILD, GW_HWNDNEXT, GetClassNameW, GetSystemMetrics, GetWindow, GetWindowRect,
+    FindWindowW,     GW_CHILD, GW_HWNDNEXT, GW_HWNDPREV, GetClassNameW, GetSystemMetrics, GetWindow, GetWindowRect,
     HWND_BOTTOM, IsWindow, IsWindowVisible, MONITORINFOF_PRIMARY, MSG, PM_REMOVE, PeekMessageW,
     RegisterClassExW, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SMTO_ABORTIFHUNG, SW_SHOWNOACTIVATE,
     SWP_FRAMECHANGED, SWP_NOACTIVATE, SendMessageTimeoutW, SetParent, SetWindowPos, ShowWindow,
@@ -272,7 +272,11 @@ impl DesktopHost {
             if parent_gone {
                 return self.attach(hwnd, rect);
             }
-            place_bottom(hwnd, self.parent, rect);
+            // 位置と Z オーダーが正しいなら SetWindowPos を避ける
+            // (定期再配置は DWM の再合成を誘発し、壁紙がちらつく原因になるため)
+            if !is_already_placed(hwnd, self.parent, rect) {
+                place_bottom(hwnd, self.parent, rect);
+            }
             true
         }
     }
@@ -284,13 +288,7 @@ impl DesktopHost {
 /// 親の座標系が仮想スクリーンとずれていても正しく配置される。
 fn place_bottom(hwnd: HWND, parent: Option<HWND>, rect: &MonitorInfo) {
     unsafe {
-        let (x, y) = if let Some(parent) = parent {
-            let mut pt = POINT::default();
-            let _ = ClientToScreen(parent, &mut pt);
-            (rect.left - pt.x, rect.top - pt.y)
-        } else {
-            (rect.left, rect.top)
-        };
+        let (x, y) = placement_origin(parent, rect);
         let _ = SetWindowPos(
             hwnd,
             Some(HWND_BOTTOM),
@@ -300,6 +298,38 @@ fn place_bottom(hwnd: HWND, parent: Option<HWND>, rect: &MonitorInfo) {
             rect.height,
             SWP_NOACTIVATE | SWP_FRAMECHANGED,
         );
+    }
+}
+
+/// `place_bottom` が置くべき親クライアント座標
+fn placement_origin(parent: Option<HWND>, rect: &MonitorInfo) -> (i32, i32) {
+    match parent {
+        Some(parent) => {
+            let mut pt = POINT::default();
+            let _ = unsafe { ClientToScreen(parent, &mut pt) };
+            (rect.left - pt.x, rect.top - pt.y)
+        }
+        None => (rect.left, rect.top),
+    }
+}
+
+/// 既に最背面かつ指定領域ぴったりに配置されているか
+///
+/// 子ウィンドウの `GetWindowRect` は親クライアント座標を返すため、
+/// `place_bottom` が使う座標と直接比較できる。
+fn is_already_placed(hwnd: HWND, parent: Option<HWND>, rect: &MonitorInfo) -> bool {
+    unsafe {
+        // 直上の兄弟ウィンドウが無ければ最背面
+        let above = GetWindow(hwnd, GW_HWNDPREV).ok();
+        if above.is_some_and(|h| !h.is_invalid()) {
+            return false;
+        }
+        let mut r = RECT::default();
+        if GetWindowRect(hwnd, &mut r).is_err() {
+            return false;
+        }
+        let (x, y) = placement_origin(parent, rect);
+        r.left == x && r.top == y && (r.right - r.left) == rect.width && (r.bottom - r.top) == rect.height
     }
 }
 
