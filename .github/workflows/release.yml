@@ -30,9 +30,15 @@ jobs:
           if (-not (Test-Path target\release\libmpv-2.dll)) { throw "libmpv-2.dll の展開に失敗しました" }
 
       - name: インストーラー作成
+        shell: pwsh
         run: |
           $version = "${{ github.ref_name }}".TrimStart('v')
-          makensis /DVERSION=$version installer.nsi
+          $makensis = Get-Command makensis -ErrorAction SilentlyContinue
+          if (-not $makensis) {
+            # windows-latest では PATH に無い場合があるため既定の場所を直接使う
+            $makensis = "C:\Program Files (x86)\NSIS\makensis.exe"
+          }
+          & $makensis /DVERSION=$version installer.nsi
 
       - name: リリース公開
         shell: pwsh
