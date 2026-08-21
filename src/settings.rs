@@ -9,13 +9,28 @@ use ab_glyph::Font;
 use egui::FontFamily;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use windows::core::PCWSTR;
+
+/// 設定ウィンドウのタイトル (既存ウィンドウの前面化でも使う)
+const WINDOW_TITLE: &str = "Livetop 設定";
 
 /// 設定ウィンドウを表示する (`--settings` モードのエントリポイント)
 pub fn run_settings_window() -> Result<(), eframe::Error> {
+    // 多重起動防止: トレイ再クリックやダブルクリックで設定ウィンドウが
+    // 2 つ出る不具合のため、既に開いているときは新しく開かず前面に出すだけ
+    let _single_instance = match crate::wallpaper::SingleInstance::acquire_settings() {
+        Some(g) => g,
+        None => {
+            log::info!("設定ウィンドウは既に開いています");
+            focus_existing_window();
+            return Ok(());
+        }
+    };
+
     let config = Config::load();
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_title("Livetop 設定")
+            .with_title(WINDOW_TITLE)
             .with_inner_size([520.0, 580.0])
             .with_min_inner_size([400.0, 420.0]),
         ..Default::default()
@@ -30,6 +45,20 @@ pub fn run_settings_window() -> Result<(), eframe::Error> {
             Ok(Box::new(SettingsApp::new(config)))
         }),
     )
+}
+
+/// 既に開いている設定ウィンドウを前面に出す (最小化されていれば元に戻す)
+fn focus_existing_window() {
+    use windows::core::HSTRING;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        FindWindowW, SetForegroundWindow, ShowWindow, SW_RESTORE,
+    };
+    unsafe {
+        if let Ok(hwnd) = FindWindowW(PCWSTR::null(), &HSTRING::from(WINDOW_TITLE)) {
+            let _ = ShowWindow(hwnd, SW_RESTORE);
+            let _ = SetForegroundWindow(hwnd);
+        }
+    }
 }
 
 /// システムから日本語フォントを探して egui に読み込む

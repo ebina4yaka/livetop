@@ -440,8 +440,17 @@ pub struct SingleInstance {
 impl SingleInstance {
     /// ミューテックスを取得する。既に起動済みなら `None`。
     pub fn acquire() -> Option<Self> {
+        Self::acquire_named(w!("Local\\LivetopSingleInstance"))
+    }
+
+    /// 設定ウィンドウ用のミューテックスを取得する (設定ウィンドウの多重起動防止)
+    pub fn acquire_settings() -> Option<Self> {
+        Self::acquire_named(w!("Local\\LivetopSettingsSingleInstance"))
+    }
+
+    fn acquire_named(name: PCWSTR) -> Option<Self> {
         unsafe {
-            let handle = CreateMutexW(None, false, w!("Local\\LivetopSingleInstance")).ok()?;
+            let handle = CreateMutexW(None, false, name).ok()?;
             if GetLastError() == ERROR_ALREADY_EXISTS {
                 let _ = CloseHandle(handle);
                 None
