@@ -13,7 +13,7 @@ use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::sync::Mutex;
 
-fn main() -> anyhow::Result<()> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     setup_logging();
     set_panic_hook();
 
@@ -23,12 +23,13 @@ fn main() -> anyhow::Result<()> {
 
     // 設定ウィンドウ専用プロセス
     if first.as_deref() == Some("--settings") {
-        return livetop::settings::run_settings_window().map_err(|e| anyhow::anyhow!("{e}"));
+        return livetop::settings::run_settings_window().map_err(|e| e.to_string().into());
     }
 
     // 通常起動 (任意で動画パスを指定)
     let video_arg = first.filter(|a| !a.starts_with('-'));
-    app::run(video_arg)
+    app::run(video_arg);
+    Ok(())
 }
 
 /// ログをファイル (`%APPDATA%\livetop\livetop.log`) とコンソールの両方へ出力する

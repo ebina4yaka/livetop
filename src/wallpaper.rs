@@ -350,6 +350,15 @@ fn find_workerw() -> Option<HWND> {
     }
 }
 
+/// ウィンドウのクラス名が `WorkerW` ("WorkerW", 7 文字) かどうか
+fn is_workerw_class(hwnd: HWND) -> bool {
+    unsafe {
+        let mut class = [0u16; 16];
+        let len = GetClassNameW(hwnd, &mut class) as usize;
+        len == 7 && class[..7] == *w!("WorkerW").as_wide()
+    }
+}
+
 /// 指定ウィンドウの直下にある「可視・全画面」の `WorkerW` を探す
 fn find_visible_fullscreen_workerw(parent: HWND) -> Option<HWND> {
     let vs = MonitorInfo::virtual_screen();
@@ -357,11 +366,7 @@ fn find_visible_fullscreen_workerw(parent: HWND) -> Option<HWND> {
         let mut child = GetWindow(parent, GW_CHILD).ok().filter(|h| !h.is_invalid());
         let mut first_workerw: Option<HWND> = None;
         while let Some(h) = child {
-            let mut class = [0u16; 16];
-            let len = GetClassNameW(h, &mut class) as usize;
-            // "WorkerW" (7 文字)
-            let is_workerw = len == 7 && class[..7] == [87u16, 111, 114, 107, 101, 114, 87];
-            if is_workerw {
+            if is_workerw_class(h) {
                 if first_workerw.is_none() {
                     first_workerw = Some(h);
                 }
@@ -395,11 +400,7 @@ fn find_progman() -> Option<HWND> {
 /// `EnumWindows` のコールバック: 子ウィンドウを持たない `WorkerW` を探す
 unsafe extern "system" fn empty_workerw_enum(hwnd: HWND, lparam: LPARAM) -> BOOL {
     unsafe {
-        let mut class = [0u16; 16];
-        let len = GetClassNameW(hwnd, &mut class) as usize;
-        // "WorkerW" (7 文字)
-        let is_workerw = len == 7 && class[..7] == [87, 111, 114, 107, 101, 114, 87];
-        if is_workerw {
+        if is_workerw_class(hwnd) {
             let child = GetWindow(hwnd, GW_CHILD).ok();
             if child.is_none_or(|h| h.is_invalid()) {
                 let slot = &mut *(lparam.0 as *mut Option<HWND>);
@@ -466,34 +467,17 @@ pub fn set_dpi_awareness() {
     }
 }
 
-/// アプリのメッセージループ (PeekMessage ベース)
-pub struct MessageLoop {
-    running: bool,
-}
-
-impl MessageLoop {
-    pub fn new() -> Self {
-        Self { running: true }
-    }
-
-    /// ループの終了を要求する
-    pub fn request_quit(&mut self) {
-        self.running = false;
-    }
-
-    /// 1 回のメッセージ処理。`false` を返すと終了要求が出ている。
-    pub fn pump(&mut self) -> bool {
-        unsafe {
-            let mut msg = MSG::default();
-            while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
-                if msg.message == WM_QUIT {
-                    self.running = false;
-                    return false;
-                }
+/// キューに溜まった Windows メッセージを処理する。WM_QUIT を受け取ったら `quit` を true にする。
+pub fn pump_messages(quit: &mut bool) {
+    unsafe {
+        let mut msg = MSG::default();
+        while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
+            if msg.message == WM_QUIT {
+                *quit = true;
+            } else {
                 let _ = TranslateMessage(&msg);
                 let _ = DispatchMessageW(&msg);
             }
         }
-        self.running
     }
 }

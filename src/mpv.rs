@@ -174,20 +174,26 @@ impl MpvLib {
         }
     }
 
-    /// イベントを 1 つ取得する (timeout=0 でノンブロッキング、無ければ None)
-    pub fn wait_event(&self, ctx: MpvHandle) -> Option<RawEventView<'_>> {
-        unsafe {
-            let f: libloading::Symbol<unsafe extern "C" fn(MpvHandle, f64) -> *const RawEvent> =
-                self.symbol(b"mpv_wait_event").ok()?;
-            let ptr = f(ctx, NO_BLOCK);
-            if ptr.is_null() {
-                return None;
+    /// 次のログメッセージを `(level, text)` で返す。ログ以外のイベントは読み飛ばす。
+    pub fn next_log_message(&self, ctx: MpvHandle) -> Option<(String, String)> {
+        loop {
+            let event = unsafe {
+                let f: libloading::Symbol<unsafe extern "C" fn(MpvHandle, f64) -> *const RawEvent> =
+                    self.symbol(b"mpv_wait_event").ok()?;
+                let ptr = f(ctx, NO_BLOCK);
+                if ptr.is_null() {
+                    return None;
+                }
+                &*ptr
+            };
+            match EventId::from_raw(event.event_id) {
+                EventId::None => return None,
+                EventId::LogMessage if !event.data.is_null() => {
+                    let m = unsafe { &*(event.data as *const RawLogMessage) };
+                    return Some((cstr_to_string(m.level), cstr_to_string(m.text)));
+                }
+                _ => {}
             }
-            let event = &*ptr;
-            if EventId::from_raw(event.event_id) == EventId::None {
-                return None;
-            }
-            Some(RawEventView { event })
         }
     }
 
@@ -206,40 +212,6 @@ impl MpvLib {
                 Err(_) => code.to_string(),
             }
         }
-    }
-}
-
-/// `mpv_wait_event` の結果 (借用した C イベント)
-pub struct RawEventView<'a> {
-    event: &'a RawEvent,
-}
-
-impl RawEventView<'_> {
-    pub fn is_log_message(&self) -> Option<LogMessageView<'_>> {
-        if EventId::from_raw(self.event.event_id) == EventId::LogMessage
-            && !self.event.data.is_null()
-        {
-            Some(LogMessageView {
-                msg: unsafe { &*(self.event.data as *const RawLogMessage) },
-            })
-        } else {
-            None
-        }
-    }
-}
-
-/// `mpv_event_log_message` の借用ビュー
-pub struct LogMessageView<'a> {
-    msg: &'a RawLogMessage,
-}
-
-impl LogMessageView<'_> {
-    pub fn level(&self) -> String {
-        cstr_to_string(self.msg.level)
-    }
-
-    pub fn text(&self) -> String {
-        cstr_to_string(self.msg.text)
     }
 }
 
@@ -300,12 +272,9 @@ impl Mpv {
 
     /// キューに溜まったイベントを処理する (主にログ取得用)
     pub fn pump_events(&mut self) {
-        while let Some(event) = self.lib.wait_event(self.ctx) {
-            if let Some(log) = event.is_log_message() {
-                let level = log.level();
-                if matches!(level.as_str(), "warn" | "error" | "fatal") {
-                    log::warn!("[mpv:{level}] {}", log.text().trim_end());
-                }
+        while let Some((level, text)) = self.lib.next_log_message(self.ctx) {
+            if matches!(level.as_str(), "warn" | "error" | "fatal") {
+                log::warn!("[mpv:{level}] {}", text.trim_end());
             }
         }
     }

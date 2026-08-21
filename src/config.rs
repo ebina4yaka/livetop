@@ -116,7 +116,9 @@ impl Config {
 
 /// 設定ファイルを置くディレクトリ (`%APPDATA%\livetop`)
 pub fn config_dir() -> PathBuf {
-    dirs::config_dir()
+    // Windows の roaming 設定ディレクトリは %APPDATA% で取れる (未設定時のみカレントに置く)
+    std::env::var_os("APPDATA")
+        .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."))
         .join(APP_NAME.to_lowercase())
 }

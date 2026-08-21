@@ -30,14 +30,14 @@ struct WallpaperInstance {
 }
 
 /// アプリを起動する。`video_arg` はコマンドライン引数で指定された動画パス。
-pub fn run(video_arg: Option<String>) -> anyhow::Result<()> {
+pub fn run(video_arg: Option<String>) {
     // DPI 認識 (モニタ間で座標がずれないように)
     wallpaper::set_dpi_awareness();
 
     // 多重起動防止
     if wallpaper::SingleInstance::acquire().is_none() {
         log::info!("既に起動中のため終了します");
-        return Ok(());
+        return;
     }
 
     // 設定の読み込み (CLI 引数があれば反映して保存)
@@ -70,21 +70,22 @@ pub fn run(video_arg: Option<String>) -> anyhow::Result<()> {
     let mut last_monitors = wallpaper::monitors();
     let mut last_monitor_check = Instant::now() - MONITOR_CHECK_INTERVAL;
 
-    // 初回起動で動画未設定の場合は設定ウィンドウを開く
-    let open_settings_on_start = !config.has_valid_video();
-    let mut first_run = open_settings_on_start;
+    // 初回起動で動画未設定の場合は設定ウィンドウを開く (一度だけ開いてフラグを落とす)
+    let mut open_settings_on_start = !config.has_valid_video();
 
     // メインループ
-    let mut loop_state = wallpaper::MessageLoop::new();
+    let mut quit = false;
     let mut last_attach_check = Instant::now() - ATTACH_CHECK_INTERVAL;
 
-    while loop_state.pump() {
+    while !quit {
+        wallpaper::pump_messages(&mut quit);
+
         // トレイのクリック/メニューイベントを処理
         handle_tray_events(
             &tray,
             &mut instances,
             &mut config,
-            &mut loop_state,
+            &mut quit,
             &mut last_config_mtime,
         );
 
@@ -118,11 +119,9 @@ pub fn run(video_arg: Option<String>) -> anyhow::Result<()> {
         }
 
         // 初回の設定ウィンドウ表示
-        if first_run {
-            first_run = false;
-            if open_settings_on_start {
-                open_settings_process();
-            }
+        if open_settings_on_start {
+            open_settings_on_start = false;
+            open_settings_process();
         }
 
         // Explorer 再起動などで外れた場合の再付着
@@ -143,13 +142,11 @@ pub fn run(video_arg: Option<String>) -> anyhow::Result<()> {
         std::thread::sleep(LOOP_SLEEP);
     }
 
-    // 後片付け (mpv 破棄 → ウィンドウ破棄)
+    // 後片付け (mpv を先に破棄してからウィンドウを破棄する)
     for inst in &mut instances {
         inst.player = None;
     }
-    drop(instances);
     log::info!("Livetop を終了します");
-    Ok(())
 }
 
 /// 設定に応じた壁紙ウィンドウ一式を作り直す
@@ -261,7 +258,7 @@ fn handle_tray_events(
     tray: &Option<tray::Tray>,
     instances: &mut [WallpaperInstance],
     config: &mut Config,
-    loop_state: &mut wallpaper::MessageLoop,
+    quit: &mut bool,
     last_config_mtime: &mut u64,
 ) {
     // トレイアイコンのクリック (左クリックで設定を開く)
@@ -288,7 +285,7 @@ fn handle_tray_events(
             toggle_autostart(config, tray, last_config_mtime);
         } else if event.id == tray.menu.quit_id {
             log::info!("トレイメニューから終了します");
-            loop_state.request_quit();
+            *quit = true;
         }
     }
 }
