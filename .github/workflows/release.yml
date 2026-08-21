@@ -33,12 +33,9 @@ jobs:
         shell: pwsh
         run: |
           $version = "${{ github.ref_name }}".TrimStart('v')
-          $makensis = Get-Command makensis -ErrorAction SilentlyContinue
-          if (-not $makensis) {
-            # windows-latest では PATH に無い場合があるため既定の場所を直接使う
-            $makensis = "C:\Program Files (x86)\NSIS\makensis.exe"
-          }
-          & $makensis /DVERSION=$version installer.nsi
+          # windows-latest には NSIS が含まれないため chocolatey で導入する
+          choco install nsis -y --no-progress
+          & "C:\Program Files (x86)\NSIS\makensis.exe" /DVERSION=$version installer.nsi
 
       - name: リリース公開
         shell: pwsh
