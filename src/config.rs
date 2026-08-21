@@ -99,8 +99,12 @@ pub fn config_path() -> PathBuf {
 impl Config {
     /// 設定を読み込む。ファイルが無い・壊れている場合は既定値を使う。
     pub fn load() -> Self {
-        let path = config_path();
-        match std::fs::read_to_string(&path) {
+        Self::load_from(&config_path())
+    }
+
+    /// 指定パスから設定を読み込む (テスト用に分離)。
+    fn load_from(path: &Path) -> Self {
+        match std::fs::read_to_string(path) {
             Ok(text) => match toml::from_str(&text) {
                 Ok(cfg) => cfg,
                 Err(e) => {
@@ -114,11 +118,16 @@ impl Config {
 
     /// 設定を保存する (親ディレクトリが無ければ作成する)。
     pub fn save(&self) -> Result<()> {
-        let path = config_path();
-        let dir = config_dir();
-        std::fs::create_dir_all(&dir)?;
+        self.save_to(&config_path())
+    }
+
+    /// 指定パスへ設定を保存する (テスト用に分離)。
+    fn save_to(&self, path: &Path) -> Result<()> {
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
         let text = toml::to_string_pretty(self).map_err(|e| Error::ConfigEncode(e.to_string()))?;
-        std::fs::write(&path, text)?;
+        std::fs::write(path, text)?;
         log::debug!("設定を保存しました: {path:?}");
         Ok(())
     }
@@ -128,5 +137,166 @@ impl Config {
         let valid = |p: &Path| !p.as_os_str().is_empty() && p.exists();
         self.video_path.as_deref().is_some_and(valid)
             || self.display_videos.values().any(|p| valid(p))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config(mode: DisplayMode) -> Config {
+        Config {
+            display_mode: mode,
+            ..Config::default()
+        }
+    }
+
+    /// テスト用の一時ファイルパス (衝突しないよう時刻とプロセス ID を付ける)
+    fn temp_path(name: &str) -> PathBuf {
+        let unique = format!(
+            "livetop-test-{name}-{}-{:?}.toml",
+            std::process::id(),
+            std::time::SystemTime::now()
+        );
+        std::env::temp_dir().join(unique)
+    }
+
+    #[test]
+    fn video_for_display_falls_back_to_video_path_outside_per_display() {
+        let mut c = config(DisplayMode::Specific);
+        c.video_path = Some("main.mp4".into());
+        c.display_videos.insert(0, "per0.mp4".into());
+        // Specific モードでは display_videos は無視される
+        assert_eq!(c.video_for_display(0), Some(PathBuf::from("main.mp4")));
+        assert_eq!(c.video_for_display(1), Some(PathBuf::from("main.mp4")));
+    }
+
+    #[test]
+    fn video_for_display_prefers_display_video_in_per_display_mode() {
+        let mut c = config(DisplayMode::PerDisplay);
+        c.video_path = Some("main.mp4".into());
+        c.display_videos.insert(0, "per0.mp4".into());
+        // 個別指定のあるディスプレイはそれを優先する
+        assert_eq!(c.video_for_display(0), Some(PathBuf::from("per0.mp4")));
+        // 指定の無いディスプレイは video_path にフォールバックする
+        assert_eq!(c.video_for_display(1), Some(PathBuf::from("main.mp4")));
+        assert_eq!(c.video_for_display(2), Some(PathBuf::from("main.mp4")));
+    }
+
+    #[test]
+    fn video_for_display_returns_none_without_any_video() {
+        let c = config(DisplayMode::PerDisplay);
+        assert_eq!(c.video_for_display(0), None);
+    }
+
+    #[test]
+    fn display_mode_serde_names() {
+        // TOML はトップレベルに enum を置けないため Config 経由で検証する
+        let names = [
+            (DisplayMode::Spanning, "spanning"),
+            (DisplayMode::PerDisplay, "per_display"),
+            (DisplayMode::Specific, "specific"),
+        ];
+        for (mode, name) in names {
+            let c = config(mode);
+            let text = toml::to_string_pretty(&c).unwrap();
+            let parsed: Config = toml::from_str(&text).unwrap();
+            assert_eq!(parsed.display_mode, mode);
+            assert!(text.contains(&format!("display_mode = \"{name}\"")));
+        }
+    }
+
+    #[test]
+    fn config_defaults() {
+        let c = Config::default();
+        assert!(c.video_path.is_none());
+        assert!(!c.autostart);
+        assert!(c.muted, "壁紙用途の初期設定はミュート");
+        assert_eq!(c.display_mode, DisplayMode::Specific);
+        assert!(c.display_videos.is_empty());
+    }
+
+    #[test]
+    fn config_roundtrip() {
+        let c = Config {
+            video_path: Some(PathBuf::from(r"C:\videos\test.mp4")),
+            autostart: true,
+            muted: false,
+            display_mode: DisplayMode::PerDisplay,
+            display_index: 1,
+            display_videos: BTreeMap::from([
+                (0, PathBuf::from(r"C:\videos\per0.mp4")),
+                (2, PathBuf::from(r"C:\videos\per2.mp4")),
+            ]),
+        };
+        let text = toml::to_string_pretty(&c).unwrap();
+        let parsed: Config = toml::from_str(&text).unwrap();
+        assert_eq!(parsed, c);
+    }
+
+    #[test]
+    fn save_then_load_roundtrip() {
+        let path = temp_path("roundtrip");
+        let c = Config {
+            video_path: Some(PathBuf::from("some-video.mp4")),
+            autostart: true,
+            muted: false,
+            display_mode: DisplayMode::Spanning,
+            display_index: 0,
+            display_videos: BTreeMap::from([(1, PathBuf::from("per1.mp4"))]),
+        };
+        c.save_to(&path).unwrap();
+        assert_eq!(Config::load_from(&path), c);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn load_from_uses_default_when_file_missing() {
+        assert_eq!(Config::load_from(&temp_path("missing")), Config::default());
+    }
+
+    #[test]
+    fn load_from_uses_default_when_toml_is_broken() {
+        let path = temp_path("broken");
+        std::fs::write(&path, "this is {{{ not toml").unwrap();
+        assert_eq!(Config::load_from(&path), Config::default());
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn load_from_accepts_partial_config() {
+        let path = temp_path("partial");
+        // 未指定フィールドは既定値で埋まる
+        std::fs::write(&path, "muted = false\n").unwrap();
+        let c = Config::load_from(&path);
+        assert!(!c.muted);
+        assert_eq!(c.video_path, None);
+        assert_eq!(c.display_mode, DisplayMode::Specific);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn has_valid_video_checks_existence() {
+        let existing = temp_path("existing-video");
+        std::fs::write(&existing, "dummy").unwrap();
+
+        let mut c = Config::default();
+        assert!(!c.has_valid_video());
+
+        c.video_path = Some(existing.clone());
+        assert!(c.has_valid_video());
+
+        c.video_path = Some(PathBuf::from(""));
+        assert!(!c.has_valid_video(), "空パスは無効");
+
+        c.video_path = None;
+        c.display_videos.insert(0, existing.clone());
+        assert!(c.has_valid_video());
+
+        c.display_videos.clear();
+        c.display_videos.insert(0, temp_path("does-not-exist"));
+        assert!(!c.has_valid_video());
+
+        let _ = std::fs::remove_file(&existing);
     }
 }
